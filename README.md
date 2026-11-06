@@ -1,6 +1,6 @@
 # Minisheet
 
-A minimal spreadsheet in a single HTML file. No build step, no server, no dependencies.
+[Minishit](https://ashishpatelengineering.github.io/minishit/) is a minimal spreadsheet in a single HTML file. No build step, no server, no dependencies.
 
 - Formulas (no `eval`): `SUM`, `AVERAGE`, `IF`, `VLOOKUP`, `SUMIF`, date functions, and more
 - Dates, sorting, insert/delete rows and columns, column widths, undo/redo
