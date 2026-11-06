@@ -109,6 +109,7 @@ button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent
 #t td[data-t="e"] { color: var(--err); }
 #t td[data-b="1"] { font-weight: 700; }
 #t td.sel { background: var(--sel); }
+#t td.pt { background: var(--sel); outline: 2px dashed var(--accent); outline-offset: -2px; }
 #t td.act { background: var(--panel); outline: 2px solid var(--accent); outline-offset: -2px; }
 #ed {
   position: absolute; z-index: 5; margin: 0; border: 2px solid var(--accent); border-radius: 0;
@@ -120,7 +121,6 @@ button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent
 #left { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #left.flash { color: var(--ink); }
 #saved { flex: none; }
-#bTheme { flex: none; padding: 2px 10px; font-size: 12px; color: var(--muted); }
 @media (pointer: coarse) {
   #t th, #t td { height: 34px; }
   input, select { font-size: 16px; }
@@ -138,6 +138,7 @@ button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent
   <button id="bOpen" title="Open a .csv or saved .json file">Open</button>
   <button id="bSave" title="Save a .json file that keeps formulas and formatting">Save</button>
   <button id="bCsv" title="Export computed values as .csv">CSV</button>
+  <button id="bTheme" type="button" title="Switch between light and dark"></button>
   <input id="file" type="file" accept=".csv,.tsv,.txt,.json,text/csv,application/json" hidden>
 </header>
 <div id="tools" class="row" style="padding-top:0">
@@ -180,7 +181,7 @@ button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent
 <div id="wrap" tabindex="0" aria-label="Spreadsheet grid">
   <div id="sheet"><table id="t"></table><input id="ed" hidden aria-label="Edit cell" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
 </div>
-<footer id="foot"><span id="left"></span><span id="saved"></span><button id="bTheme" type="button" title="Switch between light and dark"></button></footer>
+<footer id="foot"><span id="left"></span><span id="saved"></span></footer>
 
 <script>
 'use strict';
@@ -833,6 +834,30 @@ function scheduleSave() {
 
 /* ---------- editing ---------- */
 let mode = null, editAt = null;
+/* Point mode: while typing a formula, clicking or dragging cells types their address for you. */
+let pointing = null, ptStart = null, ptDrag = false, ptCells = [];
+function endPoint() { pointing = null; for (const t of ptCells) t.classList.remove('pt'); ptCells = []; }
+function canPoint() {
+  if (!mode) return false;
+  const inp = mode === 'cell' ? ed : fx, v = inp.value;
+  if (v[0] !== '=') return false;
+  if (pointing) return true;
+  return /[=+\-*\/^&(,:<>]$/.test(v.slice(0, inp.selectionStart).trimEnd());
+}
+function applyPoint(r1, c1, r2, c2) {
+  const inp = mode === 'cell' ? ed : fx;
+  const R = { r1: Math.min(r1, r2), r2: Math.max(r1, r2), c1: Math.min(c1, c2), c2: Math.max(c1, c2) };
+  const ref = (R.r1 === R.r2 && R.c1 === R.c2) ? keyOf(R.r1, R.c1) : keyOf(R.r1, R.c1) + ':' + keyOf(R.r2, R.c2);
+  const v = inp.value;
+  const a = pointing ? pointing.s : inp.selectionStart, b = pointing ? pointing.e : inp.selectionEnd;
+  inp.value = v.slice(0, a) + ref + v.slice(b);
+  pointing = { s: a, e: a + ref.length };
+  inp.setSelectionRange(pointing.e, pointing.e);
+  if (mode === 'cell') fx.value = ed.value;
+  for (const t of ptCells) t.classList.remove('pt');
+  ptCells = [];
+  forRect(R, t => { t.classList.add('pt'); ptCells.push(t); });
+}
 function rawAt(r, c) { const o = cells[keyOf(r, c)]; return o ? o.v : ''; }
 function startEdit(initial) {
   if (mode) return;
@@ -847,6 +872,7 @@ function startEdit(initial) {
 }
 function finishEdit(save, opts) {
   if (!mode) return;
+  endPoint();
   const o = opts || {}, m = mode; mode = null;
   const val = m === 'cell' ? ed.value : fx.value, at = editAt;
   ed.hidden = true;
@@ -855,9 +881,13 @@ function finishEdit(save, opts) {
   if (o.refocus !== false) wrap.focus({ preventScroll: true });
   if (o.move) moveTo(at.r + o.move[0], at.c + o.move[1], false);
 }
-ed.addEventListener('input', () => { fx.value = ed.value; });
+ed.addEventListener('input', () => { fx.value = ed.value; endPoint(); });
+ed.addEventListener('mousedown', endPoint);
+fx.addEventListener('mousedown', endPoint);
+fx.addEventListener('input', endPoint);
 ed.addEventListener('blur', () => finishEdit(true, { refocus: false }));
 ed.addEventListener('keydown', e => {
+  if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') endPoint();
   if (e.key === 'Enter') { e.preventDefault(); finishEdit(true, { move: [e.shiftKey ? -1 : 1, 0] }); }
   else if (e.key === 'Tab') { e.preventDefault(); finishEdit(true, { move: [0, e.shiftKey ? -1 : 1] }); }
   else if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
@@ -865,6 +895,7 @@ ed.addEventListener('keydown', e => {
 fx.addEventListener('focus', () => { if (!mode) { mode = 'bar'; editAt = { r: anchor.r, c: anchor.c }; } });
 fx.addEventListener('blur', () => finishEdit(true, { refocus: false }));
 fx.addEventListener('keydown', e => {
+  if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') endPoint();
   if (e.key === 'Enter') { e.preventDefault(); finishEdit(true, { move: [1, 0] }); }
   else if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
 });
@@ -1027,6 +1058,11 @@ T.addEventListener('mousedown', e => {
   if (e.button !== 0) return;
   const cell = e.target.closest('td,th'); if (!cell) return;
   e.preventDefault();
+  if (mode && canPoint()) {
+    preActive = false;
+    if (cell.tagName === 'TD') { const r = cell.parentNode.sectionRowIndex, c = cell.cellIndex - 1; ptStart = { r, c }; ptDrag = true; applyPoint(r, c, r, c); }
+    return;
+  }
   if (mode) finishEdit(true, { refocus: false });
   wrap.focus({ preventScroll: true });
   const rc = edgeCol(e);
@@ -1045,11 +1081,12 @@ T.addEventListener('mousedown', e => {
   }
 });
 T.addEventListener('mouseover', e => {
+  if (ptDrag) { const q = e.target.closest('td'); if (q) applyPoint(ptStart.r, ptStart.c, q.parentNode.sectionRowIndex, q.cellIndex - 1); return; }
   if (!drag) return;
   const cell = e.target.closest('td'); if (!cell) return;
   ext = { r: cell.parentNode.sectionRowIndex, c: cell.cellIndex - 1 }; paint();
 });
-document.addEventListener('mouseup', () => { drag = false; if (rs) { rs = null; document.body.style.cursor = ''; } });
+document.addEventListener('mouseup', () => { drag = false; ptDrag = false; if (rs) { rs = null; document.body.style.cursor = ''; } });
 document.addEventListener('mousemove', e => {
   if (!rs) return;
   colW[rs.c] = clamp(rs.w + e.clientX - rs.x, 40, 600); applyWidths(); document.body.style.cursor = 'col-resize'; scheduleSave();
@@ -1358,7 +1395,7 @@ $('bCsv').onclick = () => {
 /* ---------- light / dark ---------- */
 const dark = matchMedia('(prefers-color-scheme: dark)');
 function effTheme() { const r = document.documentElement; return r.dataset.mode || r.dataset.theme || (dark.matches ? 'dark' : 'light'); }
-function paintTheme() { $('bTheme').textContent = effTheme() === 'dark' ? 'Light mode' : 'Dark mode'; }
+function paintTheme() { $('bTheme').textContent = effTheme() === 'dark' ? 'Light' : 'Dark'; }
 $('bTheme').onclick = () => {
   const next = effTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.mode = next;
